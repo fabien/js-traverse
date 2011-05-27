@@ -98,7 +98,7 @@ function walk (root, cb) {
         
         var state = {
             node : node,
-            ancestors: [].concat(parents),
+            ancestors: [].concat(parents.slice(0, parents.length - 1)),
             path : [].concat(path),
             parent : parents.slice(-1)[0],
             key : path.slice(-1)[0],
