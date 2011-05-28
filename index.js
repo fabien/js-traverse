@@ -93,7 +93,7 @@ function walk (root, cb) {
     var path = [];
     var parents = [];
     
-    (function walker (node) {
+    (function walker (node, index) {
         var modifiers = {};
         
         var state = {
@@ -105,6 +105,7 @@ function walk (root, cb) {
             isRoot : path.length === 0,
             level : path.length,
             circular : null,
+            index: index || 0,
             update : function (x) {
                 if (state.isRoot) {
                     root = x;
@@ -163,10 +164,10 @@ function walk (root, cb) {
                 
                 if (modifiers.pre) modifiers.pre.call(state, state.node[key], key);
                 
-                var child = walker(state.node[key]);
+                var child = walker(state.node[key], i);
                 child.isLast = i == keys.length - 1;
                 child.isFirst = i == 0;
-                
+                                
                 if (modifiers.post) modifiers.post.call(state, child);
                 
                 path.pop();
