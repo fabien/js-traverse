@@ -4,12 +4,36 @@ function Traverse (obj) {
     this.value = obj;
 }
 
+Traverse.prototype.get = function (ps) {
+    var node = this.value;
+    for (var i = 0; i < ps.length; i ++) {
+        var key = ps[i];
+        if (!Object.hasOwnProperty.call(node, key)) {
+            node = undefined;
+            break;
+        }
+        node = node[key];
+    }
+    return node;
+};
+
+Traverse.prototype.set = function (ps, value) {
+    var node = this.value;
+    for (var i = 0; i < ps.length - 1; i ++) {
+        var key = ps[i];
+        if (!Object.hasOwnProperty.call(node, key)) node[key] = {};
+        node = node[key];
+    }
+    node[ps[i]] = value;
+    return value;
+};
+
 Traverse.prototype.map = function (cb) {
-    return walk(this.clone(), cb);
+    return walk(this.value, cb, true);
 };
 
 Traverse.prototype.forEach = function (cb) {
-    this.value = walk(this.value, cb);
+    this.value = walk(this.value, cb, false);
     return this.value;
 };
 
@@ -22,6 +46,79 @@ Traverse.prototype.reduce = function (cb, init) {
         }
     });
     return acc;
+};
+
+Traverse.prototype.deepEqual = function (obj) {
+    var equal = true;
+    var node = obj;
+    
+    this.forEach(function (y) {
+        var notEqual = (function () {
+            equal = false;
+            //this.stop();
+        }).bind(this);
+        
+        if (this.key) node = node[this.key];
+        var x = node;
+        
+        this.post(function () {
+            node = x;
+        });
+        
+        var toS = function (o) {
+            return Object.prototype.toString.call(o);
+        };
+        
+        if (this.circular) {
+            if (Traverse(obj).get(this.circular.path) !== x) notEqual();
+        }
+        else if (typeof x !== typeof y) {
+            notEqual();
+        }
+        else if (x.__proto__ !== y.__proto__) {
+            notEqual();
+        }
+        else if (x === y) {
+            // nop
+        }
+        else if (typeof x === 'function') {
+            if (x instanceof RegExp) {
+                // both regexps on account of the __proto__ check
+                if (x.toString() != y.toString()) notEqual();
+            }
+            else if (x !== y) notEqual();
+        }
+        else if (typeof x === 'object') {
+            if (x === null || y === null) {
+                if (x !== y) notEqual();
+            }
+            else if (toS(y) === '[object Arguments]'
+            || toS(x) === '[object Arguments]') {
+                if (toS(x) !== toS(y)) {
+                    notEqual();
+                }
+            }
+            else if (x instanceof Date || y instanceof Date) {
+                if (!(x instanceof Date) || !(y instanceof Date)
+                || x.getTime() !== y.getTime()) {
+                    notEqual();
+                }
+            }
+            else {
+                var kx = Object.keys(x);
+                var ky = Object.keys(y);
+                if (kx.length !== ky.length) return false;
+                for (var i = 0; i < kx.length; i++) {
+                    var k = kx[i];
+                    if (!Object.hasOwnProperty.call(y, k)) {
+                        notEqual();
+                    }
+                }
+            }
+        }
+    });
+    
+    return equal;
 };
 
 Traverse.prototype.paths = function () {
@@ -51,26 +148,7 @@ Traverse.prototype.clone = function () {
         }
         
         if (typeof src === 'object' && src !== null) {
-            var dst;
-            
-            if (Array.isArray(src)) {
-                dst = [];
-            }
-            else if (src instanceof Date) {
-                dst = new Date(src);
-            }
-            else if (src instanceof Boolean) {
-                dst = new Boolean(src);
-            }
-            else if (src instanceof Number) {
-                dst = new Number(src);
-            }
-            else if (src instanceof String) {
-                dst = new String(src);
-            }
-            else {
-                dst = Object.create(src.__proto__);
-            }
+            var dst = copy(src);
             
             parents.push(src);
             nodes.push(dst);
@@ -89,15 +167,17 @@ Traverse.prototype.clone = function () {
     })(this.value);
 };
 
-function walk (root, cb) {
+function walk (root, cb, immutable) {
     var path = [];
     var parents = [];
     
-    (function walker (node, index) {
+    return (function walker (node_) {
+        var node = immutable ? copy(node_) : node_;
         var modifiers = {};
         
         var state = {
             node : node,
+            node_ : node_,
             ancestors: [].concat(parents.slice(0, parents.length - 1)),
             path : [].concat(path),
             parent : parents.slice(-1)[0],
@@ -107,10 +187,7 @@ function walk (root, cb) {
             circular : null,
             index: index || 0,
             update : function (x) {
-                if (state.isRoot) {
-                    root = x;
-                }
-                else {
+                if (!state.isRoot) {
                     state.parent.node[state.key] = x;
                 }
                 state.node = x;
@@ -136,7 +213,7 @@ function walk (root, cb) {
             state.isLeaf = Object.keys(node).length == 0
             
             for (var i = 0; i < parents.length; i++) {
-                if (parents[i].node === node) {
+                if (parents[i].node_ === node_) {
                     state.circular = parents[i];
                     break;
                 }
@@ -150,7 +227,7 @@ function walk (root, cb) {
         state.notRoot = !state.isRoot;
         
         // use return values to update if defined
-        var ret = cb.call(state, node);
+        var ret = cb.call(state, state.node);
         if (ret !== undefined && state.update) state.update(ret);
         if (modifiers.before) modifiers.before.call(state, state.node);
         
@@ -164,7 +241,9 @@ function walk (root, cb) {
                 
                 if (modifiers.pre) modifiers.pre.call(state, state.node[key], key);
                 
-                var child = walker(state.node[key], i);
+                var child = walker(state.node[key]);
+                if (immutable) state.node[key] = child.node;
+
                 child.isLast = i == keys.length - 1;
                 child.isFirst = i == 0;
                                 
@@ -178,9 +257,7 @@ function walk (root, cb) {
         if (modifiers.after) modifiers.after.call(state, state.node);
         
         return state;
-    })(root);
-    
-    return root;
+    })(root).node;
 }
 
 Object.keys(Traverse.prototype).forEach(function (key) {
@@ -190,3 +267,34 @@ Object.keys(Traverse.prototype).forEach(function (key) {
         return t[key].apply(t, args);
     };
 });
+
+function copy (src) {
+    if (typeof src === 'object' && src !== null) {
+        var dst;
+        
+        if (Array.isArray(src)) {
+            dst = [];
+        }
+        else if (src instanceof Date) {
+            dst = new Date(src);
+        }
+        else if (src instanceof Boolean) {
+            dst = new Boolean(src);
+        }
+        else if (src instanceof Number) {
+            dst = new Number(src);
+        }
+        else if (src instanceof String) {
+            dst = new String(src);
+        }
+        else {
+            dst = Object.create(src.__proto__);
+        }
+        
+        Object.keys(src).forEach(function (key) {
+            dst[key] = src[key];
+        });
+        return dst;
+    }
+    else return src;
+}
