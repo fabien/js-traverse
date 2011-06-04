@@ -171,7 +171,7 @@ function walk (root, cb, immutable) {
     var path = [];
     var parents = [];
     
-    return (function walker (node_) {
+    return (function walker (node_, index) {
         var node = immutable ? copy(node_) : node_;
         var modifiers = {};
         
@@ -241,7 +241,7 @@ function walk (root, cb, immutable) {
                 
                 if (modifiers.pre) modifiers.pre.call(state, state.node[key], key);
                 
-                var child = walker(state.node[key]);
+                var child = walker(state.node[key], i);
                 if (immutable) state.node[key] = child.node;
 
                 child.isLast = i == keys.length - 1;
